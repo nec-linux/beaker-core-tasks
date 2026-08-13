@@ -84,7 +84,6 @@ static void abort_recipe(int);
 int DEBUG_LEVEL = 0;
 file_record_list thelist;
 char * url = NULL;
-static const char base64table[]="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 int inotify_fd;
 char * config_file;
 regex_t regex;
@@ -552,10 +551,6 @@ int prepare_and_upload(file_record_ptr therecord) {
 	xmlrpc_client *clientP;
 	xmlrpc_value *resultP;
 	/* base64 */
-	int len = 0;
-	int inlen = 0;
-	int padit = 0;
-	int outlen = 0;
 	int outsize; 
 	char *outstream;
 
@@ -643,34 +638,7 @@ int prepare_and_upload(file_record_ptr therecord) {
 		return 1;
 	}
 	memset(outstream, '\0', outsize);
-	while ( len < read_size ) {
-
-		for( i = 0; i < 3; i++,inlen++) {
-			if ( inlen+1 > read_size ) {
-				padit++;
-			}
-			
-			if ( i == 2 && (read_size > (len+2))) {
-				outstream[outlen++] = (unsigned char) base64table[ (int)(read_buf[inlen-2] >> 2) ];
-				outstream[outlen++] = (unsigned char) base64table[ (int)(((read_buf[inlen-2] & 0x03) << 4) | ((read_buf[inlen-1] & 0xf0) >> 4)) ];
-				outstream[outlen++] = (unsigned char) (padit >= 2 ? '=' : base64table[ (int)(((read_buf[inlen-1] & 0x0f) << 2) | ((read_buf[inlen] & 0xc0) >> 6)) ]);
-				outstream[outlen++] = (unsigned char) (padit >= 1 ? '=' : base64table[ (int)(read_buf[inlen] & 0x3f) ] );	
-			} else if ( i == 2 && (read_size == len+2) ) {
-				outstream[outlen++] = (unsigned char) base64table[ (int)(read_buf[inlen-2] >> 2) ];
-				outstream[outlen++] = (unsigned char) base64table[ (int)(((read_buf[inlen-2] & 0x03) << 4) | ((read_buf[inlen-1] & 0xf0) >> 4)) ];
-				outstream[outlen++] = (unsigned char) base64table[ (int)(((read_buf[inlen-1] & 0x0f) << 2))];
-				outstream[outlen++] = '=';
-			} else if ( i == 2 && (read_size == len+1) ) {
-				outstream[outlen++] = (unsigned char) base64table[ (int)(read_buf[inlen-2] >> 2) ];
-				outstream[outlen++] = (unsigned char) base64table[ (int)(((read_buf[inlen-2] & 0x03) << 4)) ];
-				outstream[outlen++] = '=';
-				outstream[outlen++] = '=';
-			} 
-		}
-		len += 3;
-	}
-		
-	outstream[outlen] = '\0';
+	EVP_EncodeBlock((unsigned char *)outstream, (unsigned char *)read_buf, (int)read_size);
 
 	/* md5 hashsum of the blob */
 #if OPENSSL_VERSION_NUMBER >= 0x10100000L
