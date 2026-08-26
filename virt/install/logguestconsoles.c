@@ -25,6 +25,7 @@
 #include <libxml/parser.h>
 #include <libxml/xmlmemory.h>
 #include <libxml/tree.h>
+#include <sys/epoll.h>
 
 #define EVENT_SIZE ((sizeof(struct inotify_event)+FILENAME_MAX)*512)
 #define BUF_SIZE 4096
@@ -717,6 +718,8 @@ int main(int argc, char *argv[], char *envp[]) {
 	int in_fd, out_fd;
 	ssize_t len = -1 , i = 0;
 	char events[EVENT_SIZE] = {0};
+	struct epoll_event ev;
+	int epollfd;
 	ssize_t read_bytes;
 	char read_buf[BUF_SIZE];
 	off_t in_pos, in_pos_end;
@@ -862,7 +865,41 @@ int main(int argc, char *argv[], char *envp[]) {
 		fprintf(stderr, "Error reading config file\n");
 		return 1;
 	}
+
+	epollfd = epoll_create1(0);
+	if (epollfd == -1) {
+		perror("Problem with epoll_create1: ");
+		return 1;
+	}
+	ev.events = EPOLLIN;
+	ev.data.fd = inotify_fd;
+	if (epoll_ctl(epollfd, EPOLL_CTL_ADD, inotify_fd, &ev) == -1) {
+		perror("Problem with epoll_ctl: ");
+		return 1;
+	}
+
 	while (1) {
+		struct epoll_event epoll_events[1];
+		int nfds = epoll_wait(epollfd, epoll_events, 1, 5000);
+		if (nfds == -1) {
+			if (errno == EINTR)
+				continue;
+			perror("Problem with epoll_wait: ");
+			return 1;
+		}
+
+		// If there are any logs in the buffer when a timeout occurs
+		// and no inotify event has been received, flush the buffer.
+		if (nfds == 0) {
+			file_record_ptr el = NULL;
+			for (el = thelist.firstel; el != NULL; el=el->next) {
+				if ((off_t) (el->pos - el->last_uploaded_pos) <= 1024) {
+					prepare_and_upload(el);
+				}
+			}
+			continue;
+		}
+
 		len = read (inotify_fd, events, EVENT_SIZE);
 		for (i=0; i < len; i++) {
 			struct inotify_event *event = (struct inotify_event *)&events[i];
